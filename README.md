@@ -7,3 +7,5 @@ Example:
         - Dictionary: ZipCrack.exe ExampleFile.zip passwords.txt dictionary
         - Brute force: ZipCrack.exe ExampleFile.zip abcdefghijklmnopqrstuvwxyz bruteforce
 ```
+
+[Download standalone executable](https://github.com/henriksb/ZipCrack/raw/master/ZipCrack.exe)
