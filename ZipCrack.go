@@ -87,7 +87,7 @@ func bruteforce(zipFile string, alphabet []string) {
 
 func main() {
 	if len(os.Args) < 4 {
-		fmt.Printf("\nUsage: %s [zip file] [dictionary file/letters] [type of attack]\n\nExample:\n\t- Brute force: %s ExampleFile.zip passwords.txt dictionary\n\t- Dictionary: %s ExampleFile.zip abcdefghijklmnopqrstuvwxyz dictionary\n\n", os.Args[0], os.Args[0], os.Args[0])
+		fmt.Printf("\nUsage: %s [zip file] [dictionary file/letters] [type of attack]\n\nExample:\n\t- Dictionary: %s ExampleFile.zip passwords.txt dictionary\n\t- Brute force: %s ExampleFile.zip abcdefghijklmnopqrstuvwxyz bruteforce\n\n", os.Args[0], os.Args[0], os.Args[0])
 		os.Exit(1)
 	}
 
