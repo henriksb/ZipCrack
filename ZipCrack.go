@@ -10,9 +10,32 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ramshackle-Jamathon/go-kCombinations"
 	"github.com/yeka/zip"
 )
+
+func GenerateCombinationsString(data []string, length int) <-chan []string {  
+    c := make(chan []string)
+    go func(c chan []string) {
+        defer close(c)
+        combosString(c, []string{}, data, length)
+    }(c)
+    return c
+}
+func combosString(c chan []string, combo []string, data []string, length int) {  
+    if length <= 0 {
+        return
+    }
+    var newCombo []string
+    for _, ch := range data {
+        newCombo = append(combo, ch)
+        if(length == 1){
+            output := make([]string, len(newCombo))
+            copy(output, newCombo)
+            c <- output
+        }
+        combosString(c, newCombo, data, length-1)
+    }
+}
 
 func unzip(filename string, password string) bool {
 	r, err := zip.OpenReader(filename)
@@ -70,7 +93,7 @@ func bruteforce(zipFile string, alphabet []string) {
 	count := 0
 
 	for i := 1; i <= 10; i++ {
-		for combo := range kCombinations.GenerateCombinationsString(alphabet, i) {
+		for combo := range GenerateCombinationsString(alphabet, i) {
 			res := unzip(zipFile, strings.Join(combo, ""))
 			count++
 			if res == true {
