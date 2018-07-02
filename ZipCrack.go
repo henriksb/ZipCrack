@@ -21,6 +21,7 @@ func GenerateCombinationsString(data []string, length int) <-chan []string {
     }(c)
     return c
 }
+
 func combosString(c chan []string, combo []string, data []string, length int) {  
     if length <= 0 {
         return
