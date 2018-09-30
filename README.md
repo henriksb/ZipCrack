@@ -9,4 +9,4 @@ Example:
         - Brute force: ZipCrack.exe ExampleFile.zip abcdefghijklmnopqrstuvwxyz bruteforce
 ```
 
-[Download standalone executable](https://github.com/henriksb/ZipCrack/raw/master/ZipCrack.exe)
+[Download standalone executable](https://github.com/henriksb/ZipCrack/releases/download/1/ZipCrack.exe)
