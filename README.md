@@ -10,3 +10,12 @@ Example:
 ```
 
 [Download standalone executable](https://github.com/henriksb/ZipCrack/releases/download/1/ZipCrack.exe)
+
+## Linux Setup (Thanks [kerszl](https://github.com/kerszl))
+
+```
+go mod init mymodule
+go get github.com/yeka/zip
+go build ZipCrack.go
+cp ZipCrack /usr/bin/local
+```
