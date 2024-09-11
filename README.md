@@ -21,7 +21,7 @@ go mod tidy
 go build ZipCrack.go
 ```
 
-## Install -- Linux (Thanks [kerszl](https://github.com/kerszl))
+## Install -- Linux
 
 ```
 cp ZipCrack /usr/bin/local
