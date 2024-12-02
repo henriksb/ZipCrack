@@ -13,6 +13,8 @@ Example:
 
 [Download latest version](https://github.com/henriksb/ZipCrack/releases/download/2/ZipCrack.exe)
 
+Version 2 was tested and estimated to be about 88% faster than version 1.
+
 ## Build
 
 ```
