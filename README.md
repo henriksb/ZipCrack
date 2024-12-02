@@ -11,7 +11,7 @@ Example:
         - Brute force: ZipCrack.exe -zip ExampleFile.zip -dict abcdefghijklmnopqrstuvwxyz -attack bruteforce
 ```
 
-[Download standalone executable](https://github.com/henriksb/ZipCrack/releases/download/1/ZipCrack.exe)
+[Download latest version](https://github.com/henriksb/ZipCrack/releases/download/2/ZipCrack.exe)
 
 ## Build
 
