@@ -41,3 +41,4 @@ cp ZipCrack /usr/bin/local
 ## TODO
 
 - Add --threads parameter to let user allocate as many threads as they want.
+- Fix incorrect "Total amount". This is wrong because of threading.
