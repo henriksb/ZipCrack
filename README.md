@@ -1,17 +1,23 @@
-# Warning
-Issue with version 2 bruteforce. Use version 1 or create a dictionary until this is fixed.
-
 # ZipCrack
 
 ZipCrack is a command-line tool to crack password protected Zip files without using separate programs like 7zip or Winrar to extract, which makes it a great deal faster.
 ZipCracker supports brute force and dictionary attack.
 
 ```
-Usage: ZipCrack.exe -zip [zip file] -dict [dictionary file/letters] -attack [type of attack]
+Dictionary example:
+        ZipCrack.exe --zip ExampleFile.zip --dict passwords.txt --attack dictionary
+Brute force example:
+        ZipCrack.exe --zip file.zip --attack bruteforce --min-length 1 --max-length 3 --lower --numbers
 
-Example:
-        - Dictionary: ZipCrack.exe -zip ExampleFile.zip -dict passwords.txt -attack dictionary
-        - Brute force: ZipCrack.exe -zip ExampleFile.zip -dict abcdefghijklmnopqrstuvwxyz -attack bruteforce
+Bruteforce options (can be combined):
+        --min-length [int]
+        --max-length [int]
+        --lower
+        --upper
+        --numbers
+        --special
+
+These can be combined for brute force.
 ```
 
 [Download latest version](https://github.com/henriksb/ZipCrack/releases/download/2/ZipCrack.exe)
