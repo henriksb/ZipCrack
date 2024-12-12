@@ -7,7 +7,7 @@ ZipCracker supports brute force and dictionary attack.
 Dictionary example:
         ZipCrack.exe --zip ExampleFile.zip --dict passwords.txt --attack dictionary
 Brute force example:
-        ZipCrack.exe --zip file.zip --attack bruteforce --min-length 1 --max-length 3 --lower --numbers
+        ZipCrack.exe --zip ExampleFile.zip --attack bruteforce --min-length 1 --max-length 3 --lower --numbers
 
 Bruteforce options (can be combined):
         --min-length [int]
