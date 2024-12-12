@@ -5,38 +5,38 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"github.com/yeka/zip"
 	"io"
 	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/yeka/zip"
 )
 
+// GenerateCombinationsString returns a channel of all combinations of `data` of length `length`.
 func GenerateCombinationsString(data []string, length int) <-chan []string {
 	c := make(chan []string)
-	go func(c chan []string) {
+	go func() {
 		defer close(c)
 		combosString(c, []string{}, data, length)
-	}(c)
+	}()
 	return c
 }
 
-func combosString(c chan []string, combo []string, data []string, length int) {
-	if length <= 0 {
+// combosString is a recursive helper to generate combinations of given length.
+func combosString(c chan []string, prefix []string, data []string, length int) {
+	if length == 0 {
+		// Once we've reached the desired length, emit the combination.
+		combo := make([]string, len(prefix))
+		copy(combo, prefix)
+		c <- combo
 		return
 	}
-	var newCombo []string
+
 	for _, ch := range data {
-		newCombo = append(combo, ch)
-		if length == 1 {
-			output := make([]string, len(newCombo))
-			copy(output, newCombo)
-			c <- output
-		}
-		combosString(c, newCombo, data, length-1)
+		newPrefix := append(prefix, ch)
+		combosString(c, newPrefix, data, length-1)
 	}
 }
 
@@ -100,21 +100,22 @@ func crack(zipFile string, dictFile string) {
 					fmt.Printf("Password matched: %s\nCombinations tried: %d\nTime taken: %f seconds\n", password, count, time.Since(startTime).Seconds())
 					return
 				}
-				count++
 			}
 		}()
 	}
 
 	// Send passwords to workers
 	for scanner.Scan() {
-		password := scanner.Text()
 		foundLock.Lock()
 		if found {
 			foundLock.Unlock()
 			break
 		}
 		foundLock.Unlock()
+
+		password := scanner.Text()
 		passwordChan <- password
+		count++
 	}
 
 	close(passwordChan)
@@ -129,18 +130,17 @@ func crack(zipFile string, dictFile string) {
 	}
 }
 
-func bruteforce(zipFile string, alphabet []string) {
+func bruteforce(zipFile string, alphabet []string, minLength, maxLength int) {
 	startTime := time.Now()
 	count := 0
 	found := false
 	var foundLock sync.Mutex
 	var wg sync.WaitGroup
-	combinations := GenerateCombinationsString(alphabet, 10)
 
 	passwordChan := make(chan string, 1000)
 	numWorkers := 10
 
-	// Start worker threads
+	// Start worker goroutines
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
@@ -160,24 +160,36 @@ func bruteforce(zipFile string, alphabet []string) {
 					fmt.Printf("Password matched: %s\nCombinations tried: %d\nTime taken: %f seconds\n", password, count, time.Since(startTime).Seconds())
 					return
 				}
-				count++
 			}
 		}()
 	}
 
-	// Send combinations to password channel
-	for combo := range combinations {
+	// Iterate over lengths from minLength to maxLength
+	for length := minLength; length <= maxLength; length++ {
+		combinations := GenerateCombinationsString(alphabet, length)
+
+		for combo := range combinations {
+			foundLock.Lock()
+			if found {
+				foundLock.Unlock()
+				break
+			}
+			foundLock.Unlock()
+
+			password := strings.Join(combo, "")
+			passwordChan <- password
+			count++
+		}
+
 		foundLock.Lock()
 		if found {
 			foundLock.Unlock()
 			break
 		}
 		foundLock.Unlock()
-		password := strings.Join(combo, "")
-		passwordChan <- password
-		count++
 	}
 
+	// Close the channel and wait for workers to finish
 	close(passwordChan)
 	wg.Wait()
 
@@ -191,22 +203,58 @@ func bruteforce(zipFile string, alphabet []string) {
 
 func main() {
 	zipFile := flag.String("zip", "", "Path to the zip file")
-	dictFile := flag.String("dict", "", "Path to the dictionary file or characters for brute force")
+	dictArg := flag.String("dict", "", "Path to dictionary file (if dictionary attack) or characters (if bruteforce)")
 	attack := flag.String("attack", "", "Type of attack: 'dictionary' or 'bruteforce'")
+
+	minLength := flag.Int("min-length", 1, "Minimum length for brute force")
+	maxLength := flag.Int("max-length", 10, "Maximum length for brute force")
+
+	lower := flag.Bool("lower", false, "Include lowercase letters a-z")
+	upper := flag.Bool("upper", false, "Include uppercase letters A-Z")
+	numbers := flag.Bool("numbers", false, "Include digits 0-9")
+	special := flag.Bool("special", false, "Include special characters")
+
 	flag.Parse()
 
-	if *zipFile == "" || *dictFile == "" || *attack == "" {
-		fmt.Printf("\nUsage: %s -zip [zip file] -dict [dictionary file/letters] -attack [type of attack]\n\nExample:\n\t- Dictionary: %s -zip ExampleFile.zip -dict passwords.txt -attack dictionary\n\t- Brute force: %s -zip ExampleFile.zip -dict abcdefghijklmnopqrstuvwxyz -attack bruteforce\n\n", os.Args[0], os.Args[0], os.Args[0])
+	if *zipFile == "" || *attack == "" {
+		fmt.Printf("\nUsage: %s -zip [zip file] -attack [type]\n\nDictionary example:\n\t%s --zip ExampleFile.zip --dict passwords.txt --attack dictionary\nBrute force example:\n\t%s --zip file.zip --attack bruteforce --min-length 1 --max-length 3 --lower --numbers\n\nBruteforce options (can be combined):\n\t--min-length [int]\n\t--max-length [int]\n\t--lower\n\t--upper\n\t--numbers\n\t--special\n\nThese can be combined for brute force.\n\n", os.Args[0], os.Args[0], os.Args[0])
 		os.Exit(1)
 	}
 
-	if *attack == "bruteforce" {
-		fmt.Println("Starting brute force attack..")
-		alphabet := strings.Split(*dictFile, "")
-		bruteforce(*zipFile, alphabet)
-	} else if *attack == "dictionary" {
+	if *attack == "dictionary" {
+		if *dictArg == "" {
+			log.Fatal("You must specify a dictionary file with -dict when using dictionary attack.")
+		}
 		fmt.Println("Starting dictionary attack..")
-		crack(*zipFile, *dictFile)
+		crack(*zipFile, *dictArg)
+	} else if *attack == "bruteforce" {
+		// Build the alphabet
+		alphabet := ""
+		if *dictArg != "" {
+			// If dictArg is provided and we are in brute force mode, treat dictArg as characters
+			alphabet += *dictArg
+		}
+		if *lower {
+			alphabet += "abcdefghijklmnopqrstuvwxyz"
+		}
+		if *upper {
+			alphabet += "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		}
+		if *numbers {
+			alphabet += "0123456789"
+		}
+		if *special {
+			alphabet += "!@#$%^&*()-_=+[]{}|;:'\",.<>/?\\"
+		}
+
+		if alphabet == "" {
+			fmt.Println("No characters provided for brute force (try --lower, --dict, etc.).")
+			os.Exit(1)
+		}
+
+		alphabetSlice := strings.Split(alphabet, "")
+		fmt.Println("Starting brute force attack..")
+		bruteforce(*zipFile, alphabetSlice, *minLength, *maxLength)
 	} else {
 		os.Exit(1)
 	}
