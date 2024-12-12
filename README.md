@@ -37,3 +37,7 @@ go build ZipCrack.go
 ```
 cp ZipCrack /usr/bin/local
 ```
+
+## TODO
+
+- Add --threads parameter to let user allocate as many threads as they want.
