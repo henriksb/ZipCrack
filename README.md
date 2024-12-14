@@ -20,7 +20,7 @@ Bruteforce options (can be combined):
 These can be combined for brute force.
 ```
 
-[Download latest version](https://github.com/henriksb/ZipCrack/releases/download/2/ZipCrack.exe)
+[Download latest version](https://github.com/henriksb/ZipCrack/releases/download/2.1/ZipCrack.exe)
 
 Version 2 was tested and estimated to be about 88% faster than version 1.
 
