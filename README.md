@@ -43,3 +43,4 @@ cp ZipCrack /usr/bin/local
 - Add --threads parameter to let user allocate as many threads as they want.
 - Fix incorrect "Total amount". This is wrong because of threading.
 - Add custom bruteforce letters. Currently, you can only choose the inbuilt parameters.
+- Save state feature to resume prevoius attempts
