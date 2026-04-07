@@ -5,9 +5,9 @@ ZipCracker supports brute force and dictionary attack.
 
 ```
 Dictionary example:
-        ZipCrack.exe --zip ExampleFile.zip --dict passwords.txt --attack dictionary
+        ZipCrack.exe --zip ExampleFile.zip --dict passwords.txt --attack dictionary --threads 8
 Brute force example:
-        ZipCrack.exe --zip ExampleFile.zip --attack bruteforce --min-length 1 --max-length 3 --lower --numbers
+        ZipCrack.exe --zip file.zip --attack bruteforce --min-length 1 --max-length 3 --lower --numbers --chars _$ --threads 16
 
 Bruteforce options (can be combined):
         --min-length [int]
@@ -16,8 +16,13 @@ Bruteforce options (can be combined):
         --upper
         --numbers
         --special
+        --chars [string]
 
-These can be combined for brute force.
+General options:
+        --threads [int]
+        --resume
+        --state-file [path]
+        --save-every [int]
 ```
 
 [Download latest version](https://github.com/henriksb/ZipCrack/releases/download/2.1/ZipCrack.exe)
@@ -37,10 +42,3 @@ go build ZipCrack.go
 ```
 cp ZipCrack /usr/bin/local
 ```
-
-## TODO
-
-- Add --threads parameter to let user allocate as many threads as they want.
-- Fix incorrect "Total amount". This is wrong because of threading.
-- Add custom bruteforce letters. Currently, you can only choose the inbuilt parameters.
-- Save state feature to resume prevoius attempts
