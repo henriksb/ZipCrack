@@ -29,7 +29,7 @@ Usage:
         zipcrack -m 1 -z vault.zip --custom-charset "abc123!" --increment-max 4 -t 16
 
 ```
-[Download latest version (ELF)](https://github.com/henriksb/ZipCrack/releases/download/2.2/ZipCrack)
+[Download latest version (ELF)](https://github.com/henriksb/ZipCrack/releases/download/2.2/ZipCrack) \
 [Download previous version (Windows)](https://github.com/henriksb/ZipCrack/releases/download/2.1/ZipCrack.exe)
 
 Version 2 was tested and estimated to be about 88% faster than version 1.
