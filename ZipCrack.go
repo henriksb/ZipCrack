@@ -5,259 +5,353 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"github.com/yeka/zip"
 	"io"
-	"log"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/yeka/zip"
 )
 
-// GenerateCombinationsString returns a channel of all combinations of `data` of length `length`.
-func GenerateCombinationsString(data []string, length int) <-chan []string {
-	c := make(chan []string)
-	go func() {
-		defer close(c)
-		combosString(c, []string{}, data, length)
-	}()
-	return c
+const (
+	modeDictionary  = 0
+	modeBruteforce  = 1
+	version         = "2.0.0"
+	progressInterval = 3 * time.Second
+)
+
+type Config struct {
+	ZipFile    string
+	AttackMode int
+	DictFile   string
+	Charset    string
+	MinLen     int
+	MaxLen     int
+	Workers    int
+	Quiet      bool
 }
 
-// combosString is a recursive helper to generate combinations of given length.
-func combosString(c chan []string, prefix []string, data []string, length int) {
-	if length == 0 {
-		// Once we've reached the desired length, emit the combination.
-		combo := make([]string, len(prefix))
-		copy(combo, prefix)
-		c <- combo
-		return
-	}
+// --- Stats (lock-free) ---
 
-	for _, ch := range data {
-		newPrefix := append(prefix, ch)
-		combosString(c, newPrefix, data, length-1)
-	}
+type Stats struct {
+	tried   atomic.Uint64
+	found   atomic.Int32
+	password string
+	mu       sync.Mutex // only for storing the found password string
 }
 
-func unzip(filename string, password string) bool {
-	r, err := zip.OpenReader(filename)
+func (s *Stats) SetFound(pw string) {
+	s.mu.Lock()
+	s.password = pw
+	s.mu.Unlock()
+	s.found.Store(1)
+}
+
+func (s *Stats) IsFound() bool {
+	return s.found.Load() == 1
+}
+
+func (s *Stats) GetPassword() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.password
+}
+
+// --- Zip verification ---
+
+func tryPassword(zipFile, password string) bool {
+	r, err := zip.OpenReader(zipFile)
 	if err != nil {
 		return false
 	}
 	defer r.Close()
 
-	buffer := new(bytes.Buffer)
+	buf := new(bytes.Buffer)
 	for _, f := range r.File {
 		f.SetPassword(password)
 		rc, err := f.Open()
 		if err != nil {
 			continue
 		}
-		defer rc.Close()
-		_, err = io.Copy(buffer, rc)
+		_, err = io.Copy(buf, rc)
+		rc.Close()
 		if err == nil {
 			return true
 		}
+		buf.Reset()
 	}
 	return false
 }
 
-func crack(zipFile string, dictFile string) {
-	file, err := os.Open(dictFile)
+// --- Worker pool ---
+
+func startWorkers(zipFile string, passwords <-chan string, stats *Stats, numWorkers int) *sync.WaitGroup {
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for pw := range passwords {
+				if stats.IsFound() {
+					return
+				}
+				stats.tried.Add(1)
+				if tryPassword(zipFile, pw) {
+					stats.SetFound(pw)
+					return
+				}
+			}
+		}()
+	}
+	return &wg
+}
+
+// --- Progress reporter ---
+
+func startProgress(stats *Stats, quiet bool) func() {
+	if quiet {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(progressInterval)
+		defer ticker.Stop()
+		start := time.Now()
+		for {
+			select {
+				case <-ticker.C:
+					tried := stats.tried.Load()
+					elapsed := time.Since(start).Seconds()
+					rate := float64(tried) / elapsed
+					fmt.Fprintf(os.Stderr, "\r[*] %d tried | %.0f/s | %.1fs elapsed", tried, rate, elapsed)
+				case <-done:
+					fmt.Fprint(os.Stderr, "\r\033[K") // clear line
+					return
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+// --- Dictionary attack ---
+
+func attackDictionary(cfg Config) {
+	file, err := os.Open(cfg.DictFile)
 	if err != nil {
-		log.Fatal(err)
+		fatal("Cannot open dictionary: %v", err)
 	}
 	defer file.Close()
 
+	stats := &Stats{}
+	passwords := make(chan string, cfg.Workers*64)
+	wg := startWorkers(cfg.ZipFile, passwords, stats, cfg.Workers)
+	stopProgress := startProgress(stats, cfg.Quiet)
+
 	scanner := bufio.NewScanner(file)
-	startTime := time.Now()
-	count := 0
-
-	var wg sync.WaitGroup
-	passwordChan := make(chan string, 1000)
-	found := false
-	var foundLock sync.Mutex
-
-	// Start worker threads
-	numWorkers := 10
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for password := range passwordChan {
-				foundLock.Lock()
-				if found {
-					foundLock.Unlock()
-					return
-				}
-				foundLock.Unlock()
-
-				if unzip(zipFile, password) {
-					foundLock.Lock()
-					found = true
-					foundLock.Unlock()
-					fmt.Printf("Password matched: %s\nCombinations tried: %d\nTime taken: %f seconds\n", password, count, time.Since(startTime).Seconds())
-					return
-				}
-			}
-		}()
-	}
-
-	// Send passwords to workers
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for scanner.Scan() {
-		foundLock.Lock()
-		if found {
-			foundLock.Unlock()
+		if stats.IsFound() {
 			break
 		}
-		foundLock.Unlock()
-
-		password := scanner.Text()
-		passwordChan <- password
-		count++
+		passwords <- scanner.Text()
 	}
-
-	close(passwordChan)
-	wg.Wait()
-
 	if err := scanner.Err(); err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "\n[!] Scanner error: %v\n", err)
 	}
 
-	if !found {
-		fmt.Println("Password not found.")
+	close(passwords)
+	wg.Wait()
+	stopProgress()
+	printResult(stats)
+}
+
+// --- Brute-force attack ---
+
+func attackBruteforce(cfg Config) {
+	charset := []byte(cfg.Charset)
+	cLen := len(charset)
+
+	stats := &Stats{}
+	passwords := make(chan string, cfg.Workers*64)
+	wg := startWorkers(cfg.ZipFile, passwords, stats, cfg.Workers)
+	stopProgress := startProgress(stats, cfg.Quiet)
+
+	// Iterative generation — no recursion, no goroutine overhead
+	for length := cfg.MinLen; length <= cfg.MaxLen && !stats.IsFound(); length++ {
+		indices := make([]int, length)
+		buf := make([]byte, length)
+		for {
+			if stats.IsFound() {
+				break
+			}
+			// Build password from current indices
+			for i, idx := range indices {
+				buf[i] = charset[idx]
+			}
+			passwords <- string(buf)
+
+			// Increment indices (odometer-style)
+			pos := length - 1
+			for pos >= 0 {
+				indices[pos]++
+				if indices[pos] < cLen {
+					break
+				}
+				indices[pos] = 0
+				pos--
+			}
+			if pos < 0 {
+				break // All combinations for this length exhausted
+			}
+		}
+	}
+
+	close(passwords)
+	wg.Wait()
+	stopProgress()
+	printResult(stats)
+}
+
+// --- Output ---
+
+func printResult(stats *Stats) {
+	tried := stats.tried.Load()
+	if stats.IsFound() {
+		fmt.Printf("\n%s\n\n", stats.GetPassword())
+		fmt.Fprintf(os.Stderr, "[+] Password found\n")
+		fmt.Fprintf(os.Stderr, "[*] Candidates tried: %d\n", tried)
+	} else {
+		fmt.Fprintf(os.Stderr, "[!] Exhausted — password not found (%d candidates tried)\n", tried)
 	}
 }
 
-func bruteforce(zipFile string, alphabet []string, minLength, maxLength int) {
-	startTime := time.Now()
-	count := 0
-	found := false
-	var foundLock sync.Mutex
-	var wg sync.WaitGroup
+func fatal(format string, a ...interface{}) {
+	fmt.Fprintf(os.Stderr, "[!] "+format+"\n", a...)
+	os.Exit(1)
+}
 
-	passwordChan := make(chan string, 1000)
-	numWorkers := 10
+// --- CLI ---
 
-	// Start worker goroutines
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for password := range passwordChan {
-				foundLock.Lock()
-				if found {
-					foundLock.Unlock()
-					return
-				}
-				foundLock.Unlock()
+func usage() {
+	fmt.Fprintf(os.Stderr, `zipcrack v%s — encrypted zip password recovery
 
-				if unzip(zipFile, password) {
-					foundLock.Lock()
-					found = true
-					foundLock.Unlock()
-					fmt.Printf("Password matched: %s\nCombinations tried: %d\nTime taken: %f seconds\n", password, count, time.Since(startTime).Seconds())
-					return
-				}
-			}
-		}()
-	}
+	Usage:
+	zipcrack [options]
 
-	// Iterate over lengths from minLength to maxLength
-	for length := minLength; length <= maxLength; length++ {
-		combinations := GenerateCombinationsString(alphabet, length)
+	Options:
+	-m, --attack-mode  INT   Attack mode: 0 = dictionary, 1 = brute-force (required)
+	-z, --zip          FILE  Target zip file (required)
+	-w, --wordlist     FILE  Wordlist / dictionary file (mode 0)
+	-1, --custom-charset STR Custom character set (mode 1)
+	--increment-min INT  Minimum password length [default: 1]
+	--increment-max INT  Maximum password length [default: 6]
+	-t, --threads      INT   Worker threads [default: NumCPU]
+	-q, --quiet              Suppress progress output
 
-		for combo := range combinations {
-			foundLock.Lock()
-			if found {
-				foundLock.Unlock()
-				break
-			}
-			foundLock.Unlock()
+	Built-in charsets for mode 1 (combine with --custom-charset):
+	-a  lowercase (a-z)
+	-A  uppercase (A-Z)
+	-d  digits (0-9)
+	-s  special characters
 
-			password := strings.Join(combo, "")
-			passwordChan <- password
-			count++
-		}
-
-		foundLock.Lock()
-		if found {
-			foundLock.Unlock()
-			break
-		}
-		foundLock.Unlock()
-	}
-
-	// Close the channel and wait for workers to finish
-	close(passwordChan)
-	wg.Wait()
-
-	elapsed := time.Since(startTime)
-	if !found {
-		fmt.Println("Password not found! Retry with some different settings.")
-	} else {
-		fmt.Printf("Total combinations tried: %d in %f seconds\n", count, elapsed.Seconds())
-	}
+	Examples:
+	zipcrack -m 0 -z vault.zip -w rockyou.txt
+	zipcrack -m 1 -z vault.zip -a -d --increment-min 4 --increment-max 6
+	zipcrack -m 1 -z vault.zip --custom-charset "abc123!" --increment-max 4 -t 16
+	`, version)
 }
 
 func main() {
-	zipFile := flag.String("zip", "", "Path to the zip file")
-	dictArg := flag.String("dict", "", "Path to dictionary file (if dictionary attack) or characters (if bruteforce)")
-	attack := flag.String("attack", "", "Type of attack: 'dictionary' or 'bruteforce'")
+	var cfg Config
+	var useLower, useUpper, useDigits, useSpecial, showHelp bool
+	var customCharset string
 
-	minLength := flag.Int("min-length", 1, "Minimum length for brute force")
-	maxLength := flag.Int("max-length", 10, "Maximum length for brute force")
+	flag.IntVar(&cfg.AttackMode, "m", -1, "")
+	flag.IntVar(&cfg.AttackMode, "attack-mode", -1, "")
+	flag.StringVar(&cfg.ZipFile, "z", "", "")
+	flag.StringVar(&cfg.ZipFile, "zip", "", "")
+	flag.StringVar(&cfg.DictFile, "w", "", "")
+	flag.StringVar(&cfg.DictFile, "wordlist", "", "")
+	flag.StringVar(&customCharset, "1", "", "")
+	flag.StringVar(&customCharset, "custom-charset", "", "")
+	flag.IntVar(&cfg.MinLen, "increment-min", 1, "")
+	flag.IntVar(&cfg.MaxLen, "increment-max", 6, "")
+	flag.IntVar(&cfg.Workers, "t", runtime.NumCPU(), "")
+	flag.IntVar(&cfg.Workers, "threads", runtime.NumCPU(), "")
+	flag.BoolVar(&cfg.Quiet, "q", false, "")
+	flag.BoolVar(&cfg.Quiet, "quiet", false, "")
+	flag.BoolVar(&useLower, "a", false, "")
+	flag.BoolVar(&useUpper, "A", false, "")
+	flag.BoolVar(&useDigits, "d", false, "")
+	flag.BoolVar(&useSpecial, "s", false, "")
+	flag.BoolVar(&showHelp, "h", false, "")
+	flag.BoolVar(&showHelp, "help", false, "")
 
-	lower := flag.Bool("lower", false, "Include lowercase letters a-z")
-	upper := flag.Bool("upper", false, "Include uppercase letters A-Z")
-	numbers := flag.Bool("numbers", false, "Include digits 0-9")
-	special := flag.Bool("special", false, "Include special characters")
-
+	flag.Usage = usage
 	flag.Parse()
 
-	if *zipFile == "" || *attack == "" {
-		fmt.Printf("\nUsage: %s -zip [zip file] -attack [type]\n\nDictionary example:\n\t%s --zip ExampleFile.zip --dict passwords.txt --attack dictionary\nBrute force example:\n\t%s --zip file.zip --attack bruteforce --min-length 1 --max-length 3 --lower --numbers\n\nBruteforce options (can be combined):\n\t--min-length [int]\n\t--max-length [int]\n\t--lower\n\t--upper\n\t--numbers\n\t--special\n\nThese can be combined for brute force.\n\n", os.Args[0], os.Args[0], os.Args[0])
+	if showHelp {
+		usage()
+		os.Exit(0)
+	}
+
+	// Validate required args
+	if cfg.ZipFile == "" || cfg.AttackMode < 0 {
+		usage()
 		os.Exit(1)
 	}
 
-	if *attack == "dictionary" {
-		if *dictArg == "" {
-			log.Fatal("You must specify a dictionary file with -dict when using dictionary attack.")
-		}
-		fmt.Println("Starting dictionary attack..")
-		crack(*zipFile, *dictArg)
-	} else if *attack == "bruteforce" {
-		// Build the alphabet
-		alphabet := ""
-		if *dictArg != "" {
-			// If dictArg is provided and we are in brute force mode, treat dictArg as characters
-			alphabet += *dictArg
-		}
-		if *lower {
-			alphabet += "abcdefghijklmnopqrstuvwxyz"
-		}
-		if *upper {
-			alphabet += "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-		}
-		if *numbers {
-			alphabet += "0123456789"
-		}
-		if *special {
-			alphabet += "!@#$%^&*()-_=+[]{}|;:'\",.<>/?\\"
-		}
-
-		if alphabet == "" {
-			fmt.Println("No characters provided for brute force (try --lower, --dict, etc.).")
-			os.Exit(1)
-		}
-
-		alphabetSlice := strings.Split(alphabet, "")
-		fmt.Println("Starting brute force attack..")
-		bruteforce(*zipFile, alphabetSlice, *minLength, *maxLength)
-	} else {
-		os.Exit(1)
+	if _, err := os.Stat(cfg.ZipFile); os.IsNotExist(err) {
+		fatal("Zip file not found: %s", cfg.ZipFile)
 	}
 
-	os.Exit(0)
+	if cfg.Workers < 1 {
+		cfg.Workers = 1
+	}
+
+	switch cfg.AttackMode {
+		case modeDictionary:
+			if cfg.DictFile == "" {
+				fatal("Dictionary mode requires -w/--wordlist")
+			}
+			if _, err := os.Stat(cfg.DictFile); os.IsNotExist(err) {
+				fatal("Wordlist not found: %s", cfg.DictFile)
+			}
+			fmt.Fprintf(os.Stderr, "[*] Mode: dictionary | Wordlist: %s | Threads: %d\n", cfg.DictFile, cfg.Workers)
+			attackDictionary(cfg)
+
+		case modeBruteforce:
+			var charset strings.Builder
+			charset.WriteString(customCharset)
+			if useLower {
+				charset.WriteString("abcdefghijklmnopqrstuvwxyz")
+			}
+			if useUpper {
+				charset.WriteString("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+			}
+			if useDigits {
+				charset.WriteString("0123456789")
+			}
+			if useSpecial {
+				charset.WriteString("!@#$%^&*()-_=+[]{}|;:'\",.<>/?\\")
+			}
+			cfg.Charset = charset.String()
+
+			if cfg.Charset == "" {
+				fatal("Brute-force mode requires a charset (-a, -d, -s, -A, or --custom-charset)")
+			}
+			if cfg.MinLen > cfg.MaxLen {
+				fatal("--increment-min (%d) cannot exceed --increment-max (%d)", cfg.MinLen, cfg.MaxLen)
+			}
+
+			fmt.Fprintf(os.Stderr, "[*] Mode: brute-force | Charset len: %d | Length: %d-%d | Threads: %d\n",
+				    len(cfg.Charset), cfg.MinLen, cfg.MaxLen, cfg.Workers)
+			attackBruteforce(cfg)
+
+		default:
+			fatal("Unknown attack mode: %d (use 0=dictionary, 1=bruteforce)", cfg.AttackMode)
+	}
 }
