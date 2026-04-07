@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -102,19 +101,24 @@ func unzip(filename string, password string) bool {
 	}
 	defer r.Close()
 
-	buffer := new(bytes.Buffer)
 	for _, f := range r.File {
+		if f.Flags&0x1 == 0 {
+			continue
+		}
+
 		f.SetPassword(password)
 		rc, err := f.Open()
 		if err != nil {
 			continue
 		}
-		defer rc.Close()
-		_, err = io.Copy(buffer, rc)
-		if err == nil {
+
+		_, copyErr := io.Copy(io.Discard, rc)
+		closeErr := rc.Close()
+		if copyErr == nil && closeErr == nil {
 			return true
 		}
 	}
+
 	return false
 }
 
