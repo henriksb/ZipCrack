@@ -1,7 +1,7 @@
 # ZipCrack
 
 ZipCrack is a command-line tool to crack password protected Zip files without using separate programs like 7zip or Winrar to extract, which makes it a great deal faster.
-ZipCracker supports brute force and dictionary attack.
+ZipCrack supports brute force and dictionary attack, with other perameters inspired by hashcat.
 
 ```
 Usage:
