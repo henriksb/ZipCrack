@@ -77,8 +77,9 @@ go test ./...
 
 ## Downloads
 
-[Download pre-compiled version 2.2 (ELF)](https://github.com/henriksb/ZipCrack/releases/download/2.2/ZipCrack)  
-[Download pre-compiled version 2.1 (Windows)](https://github.com/henriksb/ZipCrack/releases/download/2.1/ZipCrack.exe)
+[Download pre-compiled version 3 Linux](https://github.com/henriksb/ZipCrack/releases/download/3.0/ZipCrack)  
+
+Currently no available binaries for other operating systems, so you'll have to compile it yourself.
 
 Version 2 was tested and estimated to be about 88% faster than version 1.  
 Version 3 avoids per-attempt archive I/O and adds early-reject crypto checks for a large additional speedup on ZipCrypto targets.
